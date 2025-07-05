@@ -2,17 +2,17 @@ pipeline {
     agent any
 
     tools {
-        maven 'MVN_HOME'                 // must exist in Jenkins > Global Tools
+        maven 'MVN_HOME'
     }
 
     environment {
-        SONAR_SCANNER_HOME = tool 'sonar_scanner'     // must exist in Jenkins > Global Tools
-        SONARQUBE_SERVER = 'sonarqubeserver'         // your configured SonarQube server ID
-        NEXUS_CREDENTIAL_ID = 'nexus'                // nexus credentials
-        TOMCAT_CREDENTIAL_ID = 'tomcat'              // tomcat credentials
+        SONAR_SCANNER_HOME = tool 'sonar_scanner'
+        SONARQUBE_SERVER = 'sonarqubeserver'
+        NEXUS_CREDENTIAL_ID = 'nexus'
+        TOMCAT_CREDENTIAL_ID = 'tomcat'
 
-        NEXUS_URL = 'http://44.197.183.55:8081'      // adjust if needed
-        NEXUS_REPOSITORY = 'sonarqube'               // target repo on Nexus
+        NEXUS_URL = 'http://44.197.183.55:8081'
+        NEXUS_REPOSITORY = 'sonarqube'
         NEXUS_VERSION = 'nexus3'
         NEXUS_PROTOCOL = 'http'
     }
@@ -20,8 +20,8 @@ pipeline {
     stages {
         stage('Checkout Code') {
             steps {
-                git branch: 'master',
-                    url: 'https://github.com/betawins/sabear_simplecutomerapp.git'
+                git branch: 'feature-1.1',
+                    url: 'https://github.com/alsamdevops/sabear_simplecutomerapp.git'
             }
         }
 
@@ -54,9 +54,9 @@ pipeline {
                 script {
                     def pom = readMavenPom file: 'pom.xml'
                     def artifact = findFiles(glob: "target/*.${pom.packaging}")[0]
-                    
+
                     echo "Found artifact: ${artifact.name} at ${artifact.path}"
-                    
+
                     nexusArtifactUploader(
                         nexusVersion: "${NEXUS_VERSION}",
                         protocol: "${NEXUS_PROTOCOL}",
@@ -88,7 +88,11 @@ pipeline {
 
                     echo "Deploying ${artifact.name} to Tomcat"
 
-                    deploy adapters: [tomcat9(credentialsId: "${TOMCAT_CREDENTIAL_ID}", path: '', url: 'http://<TOMCAT_SERVER>:8080/')], contextPath: null, war: artifact.path
+                    deploy adapters: [tomcat9(credentialsId: "${TOMCAT_CREDENTIAL_ID}",
+                        path: '', 
+                        url: 'http://34.200.249.14:8080/manager/text')],
+                        contextPath: null,
+                        war: artifact.path
                 }
             }
         }
