@@ -1,98 +1,105 @@
 pipeline {
     agent any
+
     tools {
-        // Note: this should match with the tool name configured in your jenkins instance (JENKINS_URL/configureTools/)
-        maven "MVN_HOME"
-        
+        maven 'MVN_HOME'                 // must exist in Jenkins > Global Tools
     }
-	 environment {
-        // This can be nexus3 or nexus2
-        NEXUS_VERSION = "nexus3"
-        // This can be http or https
-        NEXUS_PROTOCOL = "http"
-        // Where your Nexus is running
-        NEXUS_URL = "44.197.183.55:8081/"
-        // Repository where we will upload the artifact
-        NEXUS_REPOSITORY = "sonarqube"
-        // Jenkins credential id to authenticate to Nexus OSS
-        NEXUS_CREDENTIAL_ID = "nexus_keygen"
-	SCANNER_HOME = tool 'sonar_scanner'
+
+    environment {
+        SONAR_SCANNER_HOME = tool 'sonar_scanner'     // must exist in Jenkins > Global Tools
+        SONARQUBE_SERVER = 'sonarqubeserver'         // your configured SonarQube server ID
+        NEXUS_CREDENTIAL_ID = 'nexus'                // nexus credentials
+        TOMCAT_CREDENTIAL_ID = 'tomcat'              // tomcat credentials
+
+        NEXUS_URL = 'http://44.197.183.55:8081'      // adjust if needed
+        NEXUS_REPOSITORY = 'sonarqube'               // target repo on Nexus
+        NEXUS_VERSION = 'nexus3'
+        NEXUS_PROTOCOL = 'http'
     }
+
     stages {
-        stage("clone code") {
+        stage('Checkout Code') {
             steps {
-                script {
-                    // Let's clone the source
-                    git 'https://github.com/betawins/sabear_simplecutomerapp.git';
+                git branch: 'master',
+                    url: 'https://github.com/betawins/sabear_simplecutomerapp.git'
+            }
+        }
+
+        stage('Build with Maven') {
+            steps {
+                sh 'mvn -Dmaven.test.failure.ignore=true clean install'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv("${SONARQUBE_SERVER}") {
+                    sh """
+                        ${SONAR_SCANNER_HOME}/bin/sonar-scanner \
+                        -Dsonar.projectKey=Ncodeit \
+                        -Dsonar.projectName=Ncodeit \
+                        -Dsonar.projectVersion=2.0 \
+                        -Dsonar.sources=src/ \
+                        -Dsonar.binaries=target/classes/ \
+                        -Dsonar.junit.reportPaths=target/surefire-reports \
+                        -Dsonar.jacoco.reportPaths=target/jacoco.exec \
+                        -Dsonar.java.binaries=src/
+                    """
                 }
             }
         }
-        stage("mvn build") {
+
+        stage('Publish to Nexus') {
             steps {
                 script {
-                    // If you are using Windows then you should use "bat" step
-                    // Since unit testing is out of the scope we skip them
-                    sh 'mvn -Dmaven.test.failure.ignore=true clean install'
+                    def pom = readMavenPom file: 'pom.xml'
+                    def artifact = findFiles(glob: "target/*.${pom.packaging}")[0]
+                    
+                    echo "Found artifact: ${artifact.name} at ${artifact.path}"
+                    
+                    nexusArtifactUploader(
+                        nexusVersion: "${NEXUS_VERSION}",
+                        protocol: "${NEXUS_PROTOCOL}",
+                        nexusUrl: "${NEXUS_URL}",
+                        groupId: pom.groupId,
+                        version: pom.version,
+                        repository: "${NEXUS_REPOSITORY}",
+                        credentialsId: "${NEXUS_CREDENTIAL_ID}",
+                        artifacts: [
+                            [artifactId: pom.artifactId,
+                             classifier: '',
+                             file: artifact.path,
+                             type: pom.packaging],
+                            [artifactId: pom.artifactId,
+                             classifier: '',
+                             file: 'pom.xml',
+                             type: 'pom']
+                        ]
+                    )
                 }
             }
         }
-	stage('SonarCloud') {
-            steps {
-                withSonarQubeEnv('sonarqube_server') {
-				sh '$SCANNER_HOME/bin/sonar-scanner \
-				-Dsonar.projectKey=Ncodeit \
-				-Dsonar.projectName=Ncodeit \
-				-Dsonar.projectVersion=2.0 \
-				-Dsonar.sources=/var/lib/jenkins/workspace/$JOB_NAME/src/ \
-				-Dsonar.binaries=target/classes/com/visualpathit/account/controller/ \
-				-Dsonar.junit.reportsPath=target/surefire-reports \
-				-Dsonar.jacoco.reportPath=target/jacoco.exec \
-				-Dsonar.java.binaries=src/com/room/sample '
-				
-		     }
-		}
-	    }
-        stage("publish to nexus") {
+
+        stage('Deploy to Tomcat') {
             steps {
                 script {
-                    // Read POM xml file using 'readMavenPom' step , this step 'readMavenPom' is included in: https://plugins.jenkins.io/pipeline-utility-steps
-                    pom = readMavenPom file: "pom.xml";
-                    // Find built artifact under target folder
-                    filesByGlob = findFiles(glob: "target/*.${pom.packaging}");
-                    // Print some info from the artifact found
-                    echo "${filesByGlob[0].name} ${filesByGlob[0].path} ${filesByGlob[0].directory} ${filesByGlob[0].length} ${filesByGlob[0].lastModified}"
-                    // Extract the path from the File found
-                    artifactPath = filesByGlob[0].path;
-                    // Assign to a boolean response verifying If the artifact name exists
-                    artifactExists = fileExists artifactPath;
-                    if(artifactExists) {
-                        echo "*** File: ${artifactPath}, group: ${pom.groupId}, packaging: ${pom.packaging}, version ${pom.version}";
-                        nexusArtifactUploader(
-                            nexusVersion: NEXUS_VERSION,
-                            protocol: NEXUS_PROTOCOL,
-                            nexusUrl: NEXUS_URL,
-			    groupId: pom.groupId,
-                            version: pom.version,
-                            repository: NEXUS_REPOSITORY,
-                            credentialsId: NEXUS_CREDENTIAL_ID,
-                            artifacts: [
-                                // Artifact generated such as .jar, .ear and .war files.
-                                [artifactId: pom.artifactId,
-                                classifier: '',
-                                file: artifactPath,
-                                type: pom.packaging],
-                                // Lets upload the pom.xml file for additional information for Transitive dependencies
-                                [artifactId: pom.artifactId,
-                                classifier: '',
-                                file: "pom.xml",
-                                type: "pom"]
-                            ]
-                        );
-                    } else {
-                        error "*** File: ${artifactPath}, could not be found";
-                    }
+                    def pom = readMavenPom file: 'pom.xml'
+                    def artifact = findFiles(glob: "target/*.${pom.packaging}")[0]
+
+                    echo "Deploying ${artifact.name} to Tomcat"
+
+                    deploy adapters: [tomcat9(credentialsId: "${TOMCAT_CREDENTIAL_ID}", path: '', url: 'http://<TOMCAT_SERVER>:8080/')], contextPath: null, war: artifact.path
                 }
             }
+        }
+    }
+
+    post {
+        success {
+            echo '✅ Pipeline completed successfully.'
+        }
+        failure {
+            echo '❌ Pipeline failed.'
         }
     }
 }
